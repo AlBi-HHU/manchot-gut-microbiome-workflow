@@ -1,0 +1,6 @@
+logs
+benchmarks
+data/input
+data/auxiliary
+data/output
+.snakemake

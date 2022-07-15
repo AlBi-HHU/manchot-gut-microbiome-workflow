@@ -1,0 +1,46 @@
+rule extract:
+    input:	
+        'data/input/signals/{file}.tar.gz'
+    output: 
+        temp(directory('data/auxiliary/signals/{file}/extracted')) #gets deleted when all following rules have been executed
+    resources:
+        cpus = '1',
+        gpus= '0',
+        mem = '4G',
+        walltime = '2:30:00'
+    shell: 
+        'mkdir {output} && tar xf {input} -C {output} --strip-components 1'
+        
+rule symlinkAlreadyExtractedFolder:
+    input:
+        ancient('data/input/signals/{folder}')
+    output:
+        directory('data/auxiliary/signals/{folder}/extracted')
+    log:
+        'logs/signals/{folder}/symlinkFolder.txt'
+    resources:
+        cpus = '1',
+        gpus= '0',
+        mem = '1G',
+        walltime = '0:15:00'
+    shell:
+        '{{ mkdir {output} && ln -sr {input}/* -t {output} ; }} 2> log'
+
+rule bwa_index:
+    input:
+        "{prefix}.fasta"
+
+    output:
+        "{prefix}.fasta.bwt"
+    resources:
+        # Cluster Execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:15:00'
+    conda:
+        '../envs/bwa.yaml'
+    shell:
+        'bwa index {input}'
+
+

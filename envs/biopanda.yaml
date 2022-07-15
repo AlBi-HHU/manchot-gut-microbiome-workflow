@@ -1,0 +1,9 @@
+name: biopanda
+
+channels:
+  - bioconda
+  - conda-forge
+
+dependencies:
+  - pandas
+  - biopython = 1.79

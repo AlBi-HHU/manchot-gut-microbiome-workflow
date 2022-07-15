@@ -1,0 +1,7 @@
+name: bwamem2
+
+channels:
+  - bioconda
+
+dependencies:
+  - bwa-mem2=2.2.1

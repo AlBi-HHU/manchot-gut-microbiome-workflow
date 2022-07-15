@@ -1,0 +1,54 @@
+#toggle individual components of the workflow on/off
+use_metamaps: False
+use_kraken_and_bracken: True
+use_blast: False
+use_amr: False
+use_markergene_alignments: False
+use_assembly: False
+use_eukaryota_verification: False
+use_crassphage_verification: False
+
+#db folders are relative to input/databases
+db_metamaps: metamaps
+db_kraken: kraken #Can get automatically generated if required
+db_card: card
+db_blast_use_remote: False
+db_blast: blast_screenshot_03_08_20_nt/nt #Alternative if no internet access is available or this is not feasible, a local database can be used for BLAST search of unmapped sequences
+db_species_level_marker_genes: marker_genes.fa
+db_crassphage: crassphage/1556_crAss_like_genome_sequences.fasta
+db_eukaryota: eukaryota
+db_zymo: zymo/zymo.fasta
+
+#basecalling
+guppy_bin_folder: ont-guppy-cpu/bin #Folder containing the guppy executables
+guppy_module: Guppy/5.0.7 #Overwrites bin folder
+guppy_use_gpu: True
+
+#assembly
+flye_genome-size: '1m' # '1g'
+prokka_gcode: '4'
+prokka_kingdom: Bacteria
+
+#filtering
+human_dna_fasta: 'GRCh38_full_analysis_set_plus_decoy_hla.fa'
+
+#mapping
+bracken_read_length: '100'
+
+#amr
+amr_groups: amr_groups.json
+## minimum length of an alignment to be used for AMR gene identification
+amr_min_alignment_length: 500
+## minimum length of surrounding left or right sequence to be used AMR gene taxon association
+amr_min_length_sus: 100
+amr_max_n_alignment: 50
+
+#minimap2 verification
+mm2_perc_aligned : 0.7 #Percentage of how much of a read needs to align
+mm2_perc_identity : 0.7 #How much of the aligned portion needs to agree with the reference
+mm2_uniqueness_mq : 5 #Percentage to assign a read specifically to a crassphage
+
+#population level (strain) analysis
+use_guttrsnp: True
+guttrsnp_filter_vertical: 10 #Read depth required to consider position for subspecies distance
+guttrsnp_filter_horizontal: 0.8 #Vertical coverage required to consider reference covered

@@ -1,0 +1,185 @@
+import itertools as it
+  
+def get_illumina_id(wildcards,file):
+    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+    if file == 'alignment':
+        return 'data/auxiliary/illumina_alignments/'+ret.illuminafile+'.sorted.bam'
+    elif file == 'index':
+        return 'data/auxiliary/illumina_alignments/'+ret.illuminafile+'.sorted.bam.bai'
+    else:
+        assert(False)
+
+rule bwamem2_index_references:
+    input:
+        'data/input/'+config['db_species_level_marker_genes']
+    output:
+        'data/input/'+config['db_species_level_marker_genes']+'.amb'
+    conda:
+        '../envs/bwamem2.yaml'
+    log:
+        'logs/bwaindex_markergenes.log'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '1024G',
+        walltime = '24:00:00'
+    shell:
+        '{{ bwa-mem2 index {input} ; }} 2> {log}'
+
+rule bwamem2:
+    input:
+        r1 = 'data/input/shortreads/{id}_R1.fastq.gz',
+        r2 = 'data/input/shortreads/{id}_R2.fastq.gz',
+        ref = 'data/input/'+config['db_species_level_marker_genes'],
+        idx = 'data/input/'+config['db_species_level_marker_genes']+'.amb'
+    output:
+        temp('data/auxiliary/illumina_alignments/{id}.bam')
+    benchmark:
+        'benchmarks/alignment_{id}.bmk'
+    conda:
+        '../envs/bwamem2.yaml'
+    log:
+        'logs/alignments/{id}.log'
+    resources:
+        cpus = '8',
+        gpus = '0',
+        mem = '256G',
+        walltime = '12:00:00'
+    shell:
+        '{{ bwa-mem2 mem -t {resources.cpus} {input.ref} {input.r1} {input.r2} > {output} ; }} 2> {log}'
+
+rule sort_bam:
+    input:
+        'data/auxiliary/illumina_alignments/{id}.bam'
+    output:
+        'data/auxiliary/illumina_alignments/{id}.sorted.bam'
+    conda:
+        '../envs/samtools.yaml'
+    params:
+        cpus = '1',
+        gpus = '0',
+        mem = '32G',
+        walltime = '12:00:00'
+    shell:
+        'samtools sort {input} -o {output}'
+
+rule index_bam:
+    input:
+        'data/auxiliary/illumina_alignments/{id}.sorted.bam'
+    output:
+        'data/auxiliary/illumina_alignments/{id}.sorted.bam.bai'
+    conda:
+        '../envs/samtools.yaml'
+    params:
+        cpus = '1',
+        gpus = '0',
+        mem = '16G',
+        walltime = '06:00:00'
+    shell:
+        'samtools index {input}'
+
+rule gutTrSnp_filter:
+    input:
+        alignment = lambda wildcards : get_illumina_id(wildcards,'alignment'),
+        index = lambda wildcards : get_illumina_id(wildcards,'index')
+    log:
+        'logs/guttrsnp_filter/{patientid}_{time}.log'
+    resources:
+        cpus = '4',
+        gpus = '0',
+        walltime = '8:00:00',
+        mem=lambda wildcards,input,attempt : str(32+round(1.1*((input.index.size+input.alignment.size)//1e9)))+'G'
+    benchmark:
+        'benchmarks/guttrsnp_filter/{patientid}_{time}.bmk'
+    output:
+        alleles = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.filtered'
+    conda:
+        '../envs/guttrsnp_filter.yaml'
+    script:
+        '../scripts/guttrsnp_filter.py'
+        
+        
+rule gutTrSnp_coverage:
+    input:
+        marker_genes_metadata = 'data/input/metadataMarkerGenesCompressed.csv',
+        alleles = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.filtered'
+    log:
+        'logs/guttrsnp_coverage/{patientid}_{time}.log'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        walltime = '8:00:00',
+        mem=lambda wildcards,input,attempt : str(2+round(1.1*((input.alleles.size)//1e9)))+'G'
+    benchmark:
+        'benchmarks/guttrsnp_coverage/{patientid}_{time}.bmk'
+    output:
+        summary = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.summary'
+    script:
+        '../scripts/guttrsnp_coverage.py'
+
+rule gutTrSnp_distance:
+    input:
+        marker_genes_metadata = 'data/input/metadataMarkerGenesCompressed.csv',
+        pileup_source = 'data/auxiliary/subspecies/{sourceid}_{sourcetime}.pileup.filtered',
+        pileup_dest = 'data/auxiliary/subspecies/{destid}_{desttime}.pileup.filtered'
+    params:
+        VerticalCutoffAbsolute = 10,
+        VerticalCutoffRelativeSource = 0.1,
+        VerticalCutoffRelativeDestination = 0.5
+    resources:
+        cpus = '1',
+        gpus = '0',
+        walltime = '1:00:00',
+        mem=lambda wildcards,input,attempt : str(24+round(1.8*((input.pileup_source.size+input.pileup_dest.size)//1e9)))+'G'   
+    benchmark:
+        'benchmarks/guttrsnp_distance/{sourceid}_{sourcetime}_{destid}_{desttime}.bmk' 
+    output:
+        distance = 'data/auxiliary/subspecies/distances/{sourceid}_{sourcetime}_vs_{destid}_{desttime}.dist'
+    script:
+        '../scripts/guttrsnp_distance.py'
+        
+def get_all_distances():
+    ret = []
+
+    for x,y in it.combinations(illumina_files,2):
+        ret.append('data/auxiliary/subspecies/distances/'+x['patientid']+'_'+str(x['time'])+'_vs_'+y['patientid']+'_'+str(y['time'])+'.dist')
+        ret.append('data/auxiliary/subspecies/distances/'+y['patientid']+'_'+str(y['time'])+'_vs_'+x['patientid']+'_'+str(x['time'])+'.dist')
+
+    return ret
+
+
+rule aggregate_gutTrSnp_distances:
+    input:
+        get_all_distances()
+    output:
+        'data/output/subspecies/distances.csv'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        walltime = '2:00:00',
+        mem='8G'
+    script:
+        '../scripts/aggregate_guttrsnp_distances.py'
+        
+def get_all_coverages():
+    ret = []
+
+    for x in illumina_files:
+        ret.append('data/auxiliary/subspecies/'+x['patientid']+'_'+str(x['time'])+'.pileup.summary')
+
+    return ret
+
+
+rule aggregate_gutTrSnp_coverages:
+    input:
+        get_all_coverages()
+    output:
+        'data/output/subspecies/coverages.csv'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        walltime = '2:00:00',
+        mem='8G'
+    script:
+        '../scripts/aggregate_guttrsnp_coverages.py'
+

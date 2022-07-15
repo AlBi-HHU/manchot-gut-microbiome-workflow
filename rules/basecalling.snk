@@ -1,0 +1,187 @@
+def get_signal_file(wildcards):
+    ret = signals.loc[(wildcards.signalid)]
+    return ret
+
+def get_sample_file(wildcards):
+    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+    #If no barcode is given we can assume that all content from the signal file belongs to the given sample
+    if ret.barcode == 'None' or ret.barcode == 'none':
+        return 'data/auxiliary/signals/'+ret.file+'/combined.fastq'
+    else:
+        return 'data/auxiliary/signals/'+ret.file+'/barcoding/'+ret.barcode+'.fastq'
+
+def get_barcode(wildcards):
+    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+    return ret.barcode
+
+
+checkpoint basecalling:
+    input:
+        ancient('data/auxiliary/signals/{signalid}/extracted')
+    output:
+        completionFlag = 'data/auxiliary/signals/{signalid}/basecalling/completionFlag.txt'
+    log:
+        'logs/signals/{signalid}/basecalling.txt'
+    benchmark:
+        'benchmarks/signals/{signalid}/basecalling.txt'
+    params:
+        flowcell = lambda wildcards : get_signal_file(wildcards).flowcell,
+        kit = lambda wildcards : get_signal_file(wildcards).kit,
+        folder = 'data/auxiliary/signals/{signalid}/basecalling',
+        gpu = '1' if config['guppy_use_gpu'] else 0,
+        guppy_executable =  './'+config['guppy_bin_folder']+'/guppy_basecaller' if config['guppy_module'] == 'None' else 'guppy_basecaller',
+        module_load = 'module load {}'.format(config['guppy_module']) if config['guppy_module'] != 'None' else '' 
+    resources:
+        cpus = '1' if config['guppy_use_gpu'] else '8' ,
+        gpus = '1' if config['guppy_use_gpu'] else '0',
+        mem = '64G',
+        walltime = '47:00:00'
+    shell: #A bit tricky: .zip files are not always setup correctly
+        '{{ {params.module_load} && sh scripts/guppyWrapper.sh -r {input} -o {params.folder} -e {params.guppy_executable} -f {params.flowcell} -k {params.kit} -c {resources.cpus} -g {params.gpu} && touch {output.completionFlag} ; }} 2> {log}'
+
+
+
+
+#Combines multiple fastq files produced by basecalling from one signal file into one large fastq file //TODO: Skip this and just work on folder
+rule combineFASTQFilesPerSignal:
+    input:
+        #aggregate_fastq_files
+        ancient('data/auxiliary/signals/{signalid}/basecalling/completionFlag.txt')
+    output:
+        temp('data/auxiliary/signals/{signalid}/combined.fastq')
+    #singularity:
+    params:
+        folder = 'data/auxiliary/signals/{signalid}/basecalling'
+    resources:
+        cpus = '1',
+        mem = '4G',
+        gpus = '0',
+        walltime = '2:00:00'
+    shell:
+        'find {params.folder} -name "*.fastq" | xargs -n 100 cat > {output}'
+
+rule combineFastqFilesPerBarcode:
+    input:
+        #aggregate_barcode_files,
+        'data/auxiliary/signals/{signalid}/barcoding/out'
+    output:
+        'data/auxiliary/signals/{signalid}/barcoding/{barcode}.fastq'
+    params:
+        barcodestring = lambda wildcards: str(wildcards.barcode).zfill(2)  # Fill with padding to ensure that barcode 1 is represented as 01 to match Guppy output
+    resources:
+        cpus = '1',
+        mem = '4G',
+        gpus = '0',
+        walltime = '0:30:00',
+    shell:
+        'find {input}/barcode{params.barcodestring} -name "*.fastq" | xargs -n 100 cat > {output}'
+
+checkpoint demultiplex: #TODO: if problems with incomplete files on cluster persist attempt flag solution
+    input:
+        ancient('data/auxiliary/signals/{signalid}/basecalling/completionFlag.txt')
+    output:
+        folder = directory('data/auxiliary/signals/{signalid}/barcoding/out')
+    log:
+        'logs/demux/demultiplex_{signalid}.txt'
+    benchmark:
+        'benchmarks/demux/demultiplex_{signalid}.txt'
+    params:
+        indir = 'data/auxiliary/signals/{signalid}/basecalling/pass',
+        barcodekit = lambda wildcards: get_signal_file(wildcards)['barcodekit'],
+        guppy_executable = './'+config['guppy_bin_folder']+'/guppy_barcoder' if config['guppy_module'] == 'None' else 'guppy_barcoder',
+        module_load = 'module load {}'.format(config['guppy_module']) if config['guppy_module'] != 'None' else ''
+    resources:
+        #cluster execution
+        cpus = '4',
+        gpus = '0',
+        mem = '128G',
+        walltime = '72:00:00'
+    shell:
+        "{{ {params.module_load} && {params.guppy_executable} -i {params.indir} -s {output.folder} -t {resources.cpus} --barcode_kits {params.barcodekit} --verbose_logs  ; }} 2> {log}"
+
+rule linkReads:
+    input:
+        ancient(get_sample_file)
+    output:
+        'data/auxiliary/samples/{patientid}_{time}/reads.fastq'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '128M',
+        walltime = '0:00:10'
+    shell:
+        "ln {input} {output}"
+
+rule stats:
+    input:
+        'data/auxiliary/samples/{patientid}_{time}/reads.fastq'
+    output:
+        'data/auxiliary/samples/{patientid}_{time}/stats.csv'
+    log:
+        'logs/stats/{patientid}_{time}.unfiltered.log'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '4G',
+        walltime = '1:30:00'
+    script:
+        "../scripts/readLengths_get.py"
+
+def getAllStats():
+    allStats = []
+    for idx, s in samples.iterrows():
+        allStats.append('data/auxiliary/samples/'+s['patientid'] +'_'+ str(s['time'])+ '/stats.csv')
+    return allStats
+
+rule aggregateStats:
+    input:
+        getAllStats()
+    output:
+        'data/output/sampleStats.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '128M',
+        walltime = '0:30:00'
+    script:
+        "../scripts/readLengths_aggregate.py"
+
+rule stats_filtered:
+    input:
+        'data/auxiliary/samples/{patientid}_{time}/reads.filtered.fastq'
+    output:
+        'data/auxiliary/samples/{patientid}_{time}/stats.filtered.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '16G',
+        walltime = '2:30:00'
+    script:
+        "../scripts/readLengths_get.py"
+
+def getAllFilteredStats():
+    allStats = []
+    for idx, s in samples.iterrows():
+        allStats.append('data/auxiliary/samples/'+s['patientid'] +'_'+ str(s['time'])+ '/stats.filtered.csv')
+    return allStats
+
+rule aggregateFilteredStats:
+    input:
+        getAllFilteredStats()
+    output:
+        'data/output/sampleStats.filtered.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '128M',
+        walltime = '0:30:00'
+    script:
+        "../scripts/readLengths_aggregate.py"

@@ -1,0 +1,10 @@
+name: guttrsnp_filter
+
+channels:
+  - bioconda
+  - conda-forge
+  - r
+
+dependencies:
+ - pysam = 0.18.0
+ - cython = 0.29.25
