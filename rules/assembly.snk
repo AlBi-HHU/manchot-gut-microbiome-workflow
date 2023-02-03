@@ -1,0 +1,108 @@
+from os import walk
+
+checkpoint assemble:
+	input:
+		fastq = 'data/auxiliary/samples/{patientid}_{time}_{gvhd}/reads.fastq'
+	output:
+		'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+#	singularity:
+#		"docker://"+selectedWorkflow.assembler_image
+	benchmark:
+		'benchmarks/assembly/{patientid}_{time}_{gvhd}/flye/benchmark.txt'
+	log:
+		'logs/assembly/{patientid}_{time}_{gvhd}/flye/log.txt'
+	params:
+		outdir = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye'
+	resources:
+		#cluster execution
+		cpus = '32',
+		gpus = '0',
+		mem = '128G',
+		walltime = '12:00:00'
+	shell:
+		'python3 /Flye/bin/flye --nano-raw {input.fastq} --meta --genome-size {config[flye_genome-size]} --threads {params.cpus} -o {params.outdir} 2> {log}'	
+
+'''
+rule assemble_unmapped_reads:
+	input:
+		fastq = 'data/auxiliary/samples/{patientid}_{time}_{gvhd}/reads.fastq'
+	output:
+		'data/auxiliary/' + selectedWorkflowID + '/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+		#output might not always be generated
+		#'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+	singularity:
+		"docker://"+selectedWorkflow.assembler_image
+	benchmark:
+		'benchmarks/assembly/{patientid}_{time}_{gvhd}/flye/benchmark.txt'
+	log:
+		'logs/assembly/{patientid}_{time}_{gvhd}/flye/log.txt'
+	params:
+		outdir = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye',
+		#cluster execution
+		cpus = '32',
+		gpus = '0',
+		mem = '128G',
+		walltime = '12:00:00'
+	shell:
+		'python3 /Flye/bin/flye --nano-raw {input.fastq} --meta --genome-size {config[flye_genome-size]} --threads {params.cpus} -o {params.outdir} 2> {log}'
+
+#TODO: Only run prokka if assembly was successful
+def check_for_assemblies(wildcards):
+    checkpoint_assembly = checkpoints.assemble.get(**wildcards).output.folder
+    return expand('data/auxiliary/signals/{signalid}/barcoding/out/barcode{barcode}/{fileid}.fastq',
+           signalid=wildcards.signalid,
+       barcode=wildcards.barcode,
+           fileid=glob_wildcards(os.path.join(checkpoint_demultiplex, "barcode"+wildcards.barcode+"/{fileid}.fastq")).fileid)
+'''
+
+
+rule annotate:
+	input:
+		assembly = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+	output:
+		gff = report('data/output/assembly/{patientid}_{time}_{gvhd}/prokka/annotation.gff',category='Assembly',caption='../report/annotation.rst'),
+		tsv = report('data/output/assembly/{patientid}_{time}_{gvhd}/prokka/annotation.tsv',category='Assembly',caption='../report/annotation.rst')
+#	singularity:
+#		"docker://"+selectedWorkflow.annotator_image
+	benchmark:
+		'benchmarks/assembly/{patientid}_{time}_{gvhd}/prokka/benchmark.txt'
+	log:
+		'logs/assembly/{patientid}_{time}_{gvhd}/prokka/log.txt'
+	params:
+		outdir = 'data/output/assembly/{patientid}_{time}_{gvhd}/prokka',
+		#cluster execution
+		cpus = '4',
+		gpus = '0',
+		mem = '2G',
+		walltime = '00:30:00'
+	shell:
+		'prokka --outdir {params.outdir} --force --prefix annotation --gcode {config[prokka_gcode]} --kingdom {config[prokka_kingdom]} --prefix annotation {input.assembly} 2> {log}'
+
+#Returns the corresponding short read files for a given patient and time
+def getShortReads(wildcards):
+
+	fastq_files = []
+
+	#fetch entry from the sample sheet
+	ret = samples.loc[(wildcards.patientid, int(wildcards.time))]
+	folder = ret.illuminafile
+
+	for (dirpath, dirnames, filenames) in walk(folder):
+		fastq_files.extend(filenames)
+		break
+
+	return fastq_files
+
+
+rule aggregateShortReads:
+	input:
+		getShortReads
+	output:
+		temp('data/auxiliary/assembly/{patientid}_{time}/aggregatedShortReads.fastq') #remove this later to preserve disk space
+	params:
+		cpus = '1',
+		gpus = '0',
+		mem = '1G',
+		walltime = '00:20:00'
+	shell:
+		'cat input > output'

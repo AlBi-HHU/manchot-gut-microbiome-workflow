@@ -1,0 +1,11 @@
+name: minimap2
+
+channels:
+  - bioconda
+  - conda-forge
+
+dependencies:
+  - minimap2=2.24
+  - samtools=1.13
+  - mappy=2.24
+  - biopython=1.80

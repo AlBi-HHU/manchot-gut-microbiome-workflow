@@ -1,0 +1,9 @@
+name: human_filter
+
+channels:
+  - bioconda
+  - conda-forge
+
+dependencies:
+  - minimap2=2.24
+  - perl

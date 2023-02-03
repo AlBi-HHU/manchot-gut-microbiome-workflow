@@ -1,0 +1,474 @@
+import os
+
+### AMR Analysis ###
+
+
+rule minimap_amr:
+    input:
+        fastq = ancient('data/auxiliary/samples/{patientid}_{time}/reads.filtered.fastq'),
+        card = 'data/input/databases/'+config['db_card']+'/nucleotide_fasta_protein_homolog_model.fasta'
+    output:
+        temp('data/auxiliary/mapping/{patientid}_{time}/amr/minimapAlignment.sam')
+    conda:
+        '../envs/minimap2.yaml'
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/amr_minimap.txt'
+    log:
+        'logs/mapping/{patientid}_{time}/amr_minimap.txt'
+    resources:
+        #cluster execution
+        cpus = '4',
+        gpus = '0',
+        mem = '8G',
+        walltime = '16:00:00'
+    shell:
+        'minimap2 -t {resources.cpus} -ax map-ont {input.card} {input.fastq} -o {output} 2> {log}'
+
+
+rule amr_detection:
+    input:
+        alignment = 'data/auxiliary/mapping/{patientid}_{time}/amr/minimapAlignment.sam',
+        card = 'data/input/databases/'+config['db_card']+'/nucleotide_fasta_protein_homolog_model.fasta'
+    output:
+        ide = 'data/auxiliary/mapping/{patientid}_{time}/amr/identifiedElements.txt',
+        sus = 'data/auxiliary/mapping/{patientid}_{time}/amr/surroundingSequences.txt',
+        stats = 'data/auxiliary/mapping/{patientid}_{time}/amr/stats.txt'
+    conda:
+        '../envs/amr_detection.yaml'
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/amr_detection.txt'
+    resources:
+        #cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = lambda wildcards,input,attempt : str(8+round((input.card.size)/1e9))+'G',
+        walltime = '2:00:00',
+    script:
+        '../scripts/amr_detection.py'
+
+
+
+#Returns all patient samples (their respective AMR outputs) (all timepoints) for a given patientid
+def getAllPatientSamples(wildcards):
+    ret = []
+    for row in samples.itertuples():
+
+        if (row.patientid,row.time) in missingSamples:
+            continue
+
+        ret.append('data/auxiliary/mapping/'+row.patientid+'_'+str(row.time)+'/amr/identifiedElements.txt')
+        ret.append('data/auxiliary/mapping/'+row.patientid+'_'+str(row.time)+'/amr/sus_minimap.sam')
+
+
+    return ret
+    
+rule amr_dump:
+    input:
+        getAllPatientSamples
+    output:
+        'data/output/amr/fulldump.csv'
+    log:
+        'logs/mapping/amr/full_dump.txt'
+    conda:
+        '../envs/biopanda.yaml'
+    benchmark:
+        'benchmarks/mapping/amr_dump.txt'
+    resources:
+        #cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '2:00:00'
+    script:
+        '../scripts/amr_aggregate.py'
+
+### Kraken2 ###
+
+
+rule kraken2:
+    input:
+        kr2db = ancient('/gpfs/project/databases/Kraken2-2022-09-28/kraken_db_plus'),
+        fastq = ancient('data/auxiliary/samples/{patientid}_{time}/reads.fastq')
+    output:
+        report = 'data/auxiliary/mapping/{patientid}_{time}/kraken2/report.txt',
+        stream = 'data/auxiliary/mapping/{patientid}_{time}/kraken2/stream.txt'
+    conda:
+        '../envs/kraken2.yaml'
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/kraken_mapping.txt'
+    log:
+        'logs/mapping/{patientid}_{time}/kraken_mapping.txt'
+    resources:
+        #cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '256G',
+        walltime = '16:00:00'
+    shell:
+        '{{ if [ $(stat -c %s {input.fastq}) -ne 0 ] ; then kraken2 --db {input.kr2db} --threads {resources.cpus} --report {output.report} --output {output.stream} {input.fastq}  ; else exit 1 ; fi ; }} 2> {log}'
+
+
+def getAllKrakens():
+    allKrakens = []
+    for row in samples.itertuples():
+        if (row.patientid,row.time) in missingSamples:
+            continue
+        allKrakens.append('data/auxiliary/mapping/'+row.patientid+'_'+ str(row.time) +'/kraken2/report.txt')
+    return allKrakens
+
+rule assembleKrakenDump:
+    input:
+        getAllKrakens()
+    output:
+        'data/output/mapping/KrakenFullDump.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '1G',
+        walltime = '1:30:00'
+    script:
+        "../scripts/combineKrakens.py"
+
+
+rule buildBrackenDB:
+    input:
+        kr2db = ancient('data/auxiliary/databases/'+config['db_kraken']+'/updatedDB'),
+        dbBuildFlag = 'data/auxiliary/databases/'+config['db_kraken']+'/DB.complete'
+    output:
+        kmerDistr = 'data/auxiliary/databases/'+config['db_kraken']+'/kmerDistribution.txt'
+    conda:
+        '../envs/bracken.yaml'
+    benchmark:
+        'benchmarks/databases/buildBrackenDB.txt'
+    log:
+        'logs/databases/buildBrackenDB.txt'
+    params:
+        #cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '8G',
+        walltime = '4:00:00'
+    shell:
+            "{{ bracken-build -d {input.kr2db} -t {params.cpus}  -l {config[bracken_read_length]} && \
+        mv {input.kr2db}/database{config[bracken_read_length]}mers.kmer_distrib {output.kmerDistr} ; }} 2>{log}"
+
+rule bracken:
+    input:
+        report = 'data/auxiliary/mapping/{patientid}_{time}/kraken2/report.txt',
+        kmerDistr = ancient('data/auxiliary/databases/'+config['db_kraken']+'/kmerDistribution.txt')
+    output:
+        rks='data/output/mapping/{patientid}_{time}/bracken/report_kraken_style_{level}.txt',
+        rbs='data/output/mapping/{patientid}_{time}/bracken/report_bracken_style_{level}.txt'
+    conda:
+        '../envs/bracken.yaml'
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/bracken_mapping_{level}.txt'
+    params:
+        level = lambda wildcards: wildcards.level 
+    log:
+        'logs/mapping/{patientid}_{time}/bracken_mapping_{level}.txt'
+    resources:
+        #cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '03:59:00'
+    shell:
+        'est_abundance.py -i {input.report} -k {input.kmerDistr} -o {output.rbs} -l {params.level} --out-report {output.rks}  2> {log}'
+
+
+def getAllBrackens(wildcards):
+    allBrackens = []
+    for row in samples.itertuples():
+        if (row.patientid,row.time) in missingSamples:
+            continue
+        allBrackens.append('data/output/mapping/'+row.patientid +'_'+ str(row.time)+ '/bracken/report_kraken_style_'+wildcards.level+'.txt')
+    return allBrackens
+
+rule assembleBrackenDump:
+    input:
+        getAllBrackens
+    output:
+        'data/output/mapping/BrackenFullDump_{level}.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '1G',
+        walltime = '1:30:00'
+    script:
+        "../scripts/combineKrakens.py"
+
+rule blast:
+    input:
+        ancient('data/auxiliary/samples/{patientid}_{time}_{gvhd}/unclassified_reads.fastq')
+    output:
+        'data/auxiliary/unmappedReads/{patientid}_{time}_{gvhd}/blast.txt'
+#    singularity:
+#        "docker://"+selectedWorkflow.blast_image
+    benchmark:
+        'benchmarks/blast/{patientid}_{time}_{gvhd}.txt'
+    log:
+        'logs/blast/{patientid}_{time}_{gvhd}.txt'
+    params:
+        #cluster execution
+        cpus = '16',
+        gpus = '0',
+        mem = '256G',
+        walltime = '24:00:00'
+    shell:
+        'blastn '+( '-db data/input/databases/{config[db_blast]}'if config['db_blast_use_remote'] == False else '-remote -db nt' )+' -query {input} -outfmt 6 -out {output} -num_threads {params.cpus} -max_target_seqs 1 2> {log}'
+
+rule createMinimapIndexForMarkerGenes:
+    input:
+        mmdb = 'data/input/databases/markerGenes.fa'
+    output:
+        mmdb = 'data/input/databases/markerGenes.mmi'
+#    singularity:
+#        "docker://" + selectedWorkflow.amr_image
+    params:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '196G',
+        walltime = '2:00:00'
+    shell:
+        'minimap2 -d {output} {input}'
+
+rule alignIlluminaSequencedSamplesToMarkerGenes:
+    input:
+        mmdb = 'data/input/databases/markerGenes.mmi',
+        fastq = 'data/auxiliary/samples/{patientid}_{time}/reads.filtered.fastq'
+    output:
+        alignment  = temp('data/auxiliary/mapping/{patientid}_{time}/markerGenes/{patientid}_{time}.sam'),
+        tmp = temp(directory('data/auxiliary/mapping/{patientid}_{time}/markerGenes/tmp'))
+    log:
+        'logs/mapping/{patientid}_{time}/markerGenes/alignment.txt'
+#    singularity:
+#        "docker://"+selectedWorkflow.amr_image
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/alignmentVsMarkerGenes.txt'
+    resources:
+        #cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '196G',
+        walltime = '16:00:00'
+    shell:
+        'mkdir {output.tmp} && minimap2 -t {params.cpus} --split-prefix {output.tmp} -ax map-ont {input.mmdb} {input.fastq} -o {output.alignment} 2> {log}'
+
+rule convertMarkerGeneAlignmentToBAM:
+    input:
+        'data/auxiliary/mapping/{patientid}_{time}/markerGenes/{patientid}_{time}.sam'
+    output:
+        'data/auxiliary/mapping/{patientid}_{time}/markerGenes/{patientid}_{time}.bam'
+    log:
+        'logs/mapping/{patientid}_{time}/markerGenes/alignmentConversion.txt'
+    benchmark:
+        'benchmarks/mapping/{patientid}_{time}/alignmentVsMarkerGenes.txt'
+    resources:
+        # cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '64G',
+        walltime = '8:00:00'
+    shell:
+        'module load sambamba/0.6.6 && sambamba view -f bam -t 8 -S -l 0 -o {output} {input}'
+        
+        
+        
+# Additional Verification
+
+rule align_to_crassphage:
+    input:
+        fastq = 'data/auxiliary/samples/{patientid}_{time}/reads.fastq',
+        database = 'data/input/databases/'+config['db_crassphage']
+    output:
+        alignment = 'data/auxiliary/mapping/crassphage/{patientid}_{time}.sam'
+    conda:
+        '../envs/minimap2.yaml'
+    log:
+        'logs/mapping/crassphage/{patientid}_{time}.txt'
+    benchmark:
+        'benchmarks/mapping/crassphage/{patientid}_{time}.txt'
+    resources:
+        # cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '8G',
+        walltime = '8:00:00'
+    shell:
+        'minimap2 -t {resources.cpus} -ax map-ont --secondary=no {input.database} {input.fastq} -o {output.alignment}'
+     
+
+
+        
+rule zymo_check:
+    input:
+        fastq = 'data/auxiliary/samples/{patientid}_{time}/reads.fastq',
+        database = 'data/input/databases/'+config['db_zymo']
+    output:
+        alignment = 'data/auxiliary/mapping/zymo/{patientid}_{time}.sam'
+    conda:
+        '../envs/minimap2.yaml'
+    log:
+        'logs/mapping/zymo/{patientid}_{time}.txt'
+    benchmark:
+        'benchmarks/mapping/zymo/{patientid}_{time}.txt'
+    resources:
+        # cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '8G',
+        walltime = '8:00:00'
+    shell:
+        'minimap2 -t {resources.cpus} -ax map-ont --secondary=no {input.database} {input.fastq} -o {output.alignment}'    
+        
+        
+
+rule process_crassphage_alignment:
+    input:
+        alignment = 'data/auxiliary/mapping/crassphage/{patientid}_{time}.sam',
+        stream = 'data/auxiliary/mapping/{patientid}_{time}/kraken2/stream.txt'
+    output:
+        stats = 'data/auxiliary/crassphage/summary_{patientid}_{time}.csv',
+        migration = 'data/auxiliary/crassphage/migration_{patientid}_{time}.csv'
+    conda:
+        '../envs/pysam.yaml'
+    log:
+        'logs/eukaryota/crassphage/{patientid}_{time}_aggregation.log'
+    resources:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = lambda wc,input,attempt : str(
+            max(
+                round(
+                    input.size/1e9
+                )+1,
+                2
+            )
+        )+'G',
+        walltime = '0:30:00'
+    script:
+        '../scripts/analyze_crassphage_alignments.py'      
+        
+        
+def get_all_crassphage_analyses(wildcards):
+    all = []
+    for row in samples.itertuples():
+        if (row.patientid,row.time) in missingSamples:
+            continue
+        all.append('data/auxiliary/crassphage/summary_'+row.patientid +'_'+ str(row.time)+ '.csv')
+    return all
+
+rule assemble_crassphage_analyses:
+    input:
+        get_all_crassphage_analyses
+    output:
+        'data/output/crassphage/summary.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '0:30:00'
+    script:
+        "../scripts/concat_pandas_tables.py"
+        
+def get_all_crassphage_migrations(wildcards):
+    all = []
+    for row in samples.itertuples():
+        if (row.patientid,row.time) in missingSamples:
+            continue
+        all.append('data/auxiliary/crassphage/migration_'+row.patientid +'_'+ str(row.time)+ '.csv')
+    return all
+
+rule assemble_crassphage_migrations:
+    input:
+        get_all_crassphage_migrations
+    output:
+        'data/output/crassphage/migration.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '0:30:00'
+    script:
+        "../scripts/concat_pandas_tables.py"
+        
+def get_all_crassphage_alignments(wildcards):
+    all = []
+    for row in samples.itertuples():
+        if (row.patientid,row.time) in missingSamples:
+            continue
+        all.append('data/auxiliary/mapping/crassphage/'+row.patientid +'_'+ str(row.time)+ '.sam')
+    return all
+            
+rule assemble_crassphage_mapping_qualities:
+    input:
+        get_all_crassphage_alignments
+    output:
+        'data/output/crassphage/mapping.csv'
+    log:
+        'logs/crassphage/assemble_mapping_quals.log'
+    conda:
+        '../envs/pysam.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        #mem = lambda wc, input, attempt : str(1+round(max(x.size for x in input)/1e9))+'G',
+        mem = '32G',
+        walltime = '1:30:00'
+    script:
+        "../scripts/assemble_mapping_qualities.py"    
+        
+rule filter_human:
+    input:
+        reads = 'data/auxiliary/samples/{patientid}_{time}/reads.fastq',
+        database = 'data/input/databases/'+config['db_human']
+    output:
+        reads = temp('data/auxiliary/samples/{patientid}_{time}/reads.filtered.fastq'),
+        stats = 'data/auxiliary/samples/{patientid}_{time}/filtering.stats'
+    conda:
+        '../envs/minimap2.yaml'
+    log:
+        'logs/mapping/filter_human/{patientid}_{time}.txt'
+    benchmark:
+        'benchmarks/filter_human/{patientid}_{time}.txt'
+    resources:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '32G',
+        walltime = '48:00:00'
+    script:
+        '../scripts/filter_human.py'   
+        
+rule filter_human_kraken:
+    input:
+        reads = 'data/auxiliary/samples/{patientid}_{time}/reads.filtered.fastq',
+        stream = 'data/auxiliary/mapping/{patientid}_{time}/kraken2_lang/stream.txt'
+    output:
+        reads = 'data/auxiliary/samples/{patientid}_{time}/reads.filtered.2.fastq',
+        stats = 'data/auxiliary/samples/{patientid}_{time}/filtering.2.stats'
+    conda:
+        '../envs/biopanda.yaml'
+    log:
+        'logs/mapping/filter_human_2/{patientid}_{time}.txt'
+    benchmark:
+        'benchmarks/filter_human_2/{patientid}_{time}.txt'
+    resources:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '32G',
+        walltime = '48:00:00'
+    script:
+        '../scripts/filter_human_kraken.py'    

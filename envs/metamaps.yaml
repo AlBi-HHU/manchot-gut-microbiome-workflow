@@ -1,0 +1,8 @@
+name: metamaps
+
+channels:
+  - bioconda
+  - conda-forge
+
+dependencies:
+  - metamaps=0.1.98102e9
