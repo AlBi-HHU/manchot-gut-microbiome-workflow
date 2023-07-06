@@ -1,18 +1,18 @@
 import pysam
 from Bio import SeqIO
 
-MIN_ALIGNMENT_LENGTH = snakemake.config['amr_min_alignment_length']
-MIN_LENGTH_LR = snakemake.config['amr_min_length_sus']
-MAX_NS_ALIGNED_SEGMENT = snakemake.config['amr_max_n_alignment']
+MIN_ALIGNMENT_LENGTH = snakemake.config['gene_min_alignment_length']
+MIN_LENGTH_LR = snakemake.config['gene_min_length_sus']
+MAX_NS_ALIGNED_SEGMENT = snakemake.config['gene_max_n_alignment']
 
 #read database
 reference_db = SeqIO.to_dict(
     SeqIO.parse(
-        snakemake.input['card'],'fasta'
+        snakemake.input['db_gene'],'fasta'
     )
 )
 
-f = pysam.AlignmentFile(snakemake.input['alignment'],'r')
+f = pysam.AlignmentFile(snakemake.input['alignment'],mode='r',check_sq=False)
 secondary_supplementary_alignments = 0
 short_alignments = 0
 no_sufficient_surroundings = 0

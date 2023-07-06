@@ -1,0 +1,28 @@
+$schema: "http://json-schema.org/draft-04/schema#"
+
+description: snakemake config file
+properties:
+  db_metamaps:
+    type: string
+    description: describes, which database should be used for metamaps (folder path relative to data/input/databases)
+  db_kraken:
+    type: string
+    description: describes, which database should be used for kraken (folder path relative to data/input/databases)
+  db_card:
+    type: string
+    description: describes, which database should be used for card (ARM) (folder path relative to data/input/databases)
+  db_vf:
+    type: string
+    description: describes, which database should be used for vf (Virulenz Factors) (folder path relative to data/input/databases)
+  db_blast:
+    type: string
+    description: describes, which database should be used for blast (folder path relative to data/input/databases)
+  db_blast_use_remote:
+    type: boolean
+    description: if true, no local database is used, instead the search is performed online
+
+
+
+required:
+  - db_metamaps
+  - db_kraken

@@ -8,8 +8,7 @@ for record in SeqIO.parse(snakemake.input[0], 'fastq'):
 	readLengths.append(len(record))
 
 pd.DataFrame(
-	[(snakemake.wildcards.patientid,
-	  snakemake.wildcards.time,
+	[(snakemake.wildcards.samplename,
 	  len(readLengths),
 	  np.sum(readLengths),
 	  np.median(readLengths),
@@ -18,5 +17,5 @@ pd.DataFrame(
 	  np.min(readLengths),
 	  np.max(readLengths)
 	)],
-	columns=['patientid', 'time', 'nReads', 'nBases','median','mean','standard deviation','minimum','maximum']
+	columns=['samplename', 'nReads', 'nBases','median','mean','standard deviation','minimum','maximum']
 ).to_csv(snakemake.output[0])

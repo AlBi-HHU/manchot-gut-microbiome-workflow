@@ -1,0 +1,26 @@
+$schema: "http://json-schema.org/draft-04/schema#"
+
+description: an entry in the signal sheet
+properties:
+  file:
+    type: string
+    description: fast5 singal file
+  barcode:
+    type: string
+    description: barcode identifier
+  samplename:
+    type: string
+    description: primary identifier for the sample
+  mode:
+    type: string
+    description: describes whether a signal file is used as input or fastq reads (skipping basecalling)
+    enum: ["signal","fastq"]
+  illuminafile:
+    type: string
+    description: gives a folder containing complementary short reads for each sample (or none)
+
+required:
+  - file
+  - barcode
+  - samplename
+  - mode

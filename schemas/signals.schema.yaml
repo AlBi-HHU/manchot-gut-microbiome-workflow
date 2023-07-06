@@ -1,0 +1,18 @@
+$schema: "http://json-schema.org/draft-04/schema#"
+
+description: an entry in the signal sheet
+properties:
+  signalid:
+    type: string
+    description: fast5 singal id
+  flowcell:
+    type: string
+    description: identifier of the flowcell used
+  kit:
+    type: string
+    description: kit used for sequencing
+
+required:
+  - signalid
+  - flowcell
+  - kit

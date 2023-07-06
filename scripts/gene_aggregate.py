@@ -15,10 +15,8 @@ def chunked_iterable(iterable, size):
 dfs = []
 for identifiedElements,surroundingSequences in chunked_iterable(snakemake.input,2):
 
-    sampleInfo = identifiedElements.split('/')[-3].split('_')
-    patient = sampleInfo[0]
-    time = sampleInfo[1]
-    
+    samplename = identifiedElements.split('/')[-3]
+
     #print(patient,time)
     
     bestMappings={}
@@ -66,10 +64,10 @@ for identifiedElements,surroundingSequences in chunked_iterable(snakemake.input,
             if sequence in associatedTaxa:
                 for taxon in associatedTaxa[sequence]:
                     assigned = True
-                    tuples.append((patient,time,gene,origin,other_annotations,taxon,len(associatedTaxa[sequence])))
+                    tuples.append((samplename,gene,origin,other_annotations,taxon,len(associatedTaxa[sequence])))
             else:
-                    tuples.append((patient,time,gene,origin,other_annotations,'Not Assigned',0))
-    df = pd.DataFrame(tuples,columns=['Patient','Time','Gene','Source Taxon','Other Annotations','Assigned Taxon','Ambiguous Assignments'])
+                    tuples.append((samplename,gene,origin,other_annotations,'Not Assigned',0))
+    df = pd.DataFrame(tuples,columns=['Samplename','Gene','Source Taxon','Other Annotations','Assigned Taxon','Ambiguous Assignments'])
     dfs.append(df)
 combined = pd.concat(dfs)
 combined.to_csv(snakemake.output[0],index=False)

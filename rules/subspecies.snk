@@ -1,7 +1,7 @@
 import itertools as it
   
 def get_illumina_id(wildcards,file):
-    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+    ret = samples.loc[wildcards.samplename]
     if file == 'alignment':
         return 'data/auxiliary/illumina_alignments/'+ret.illuminafile+'.sorted.bam'
     elif file == 'index':
@@ -83,16 +83,16 @@ rule gutTrSnp_filter:
         alignment = lambda wildcards : get_illumina_id(wildcards,'alignment'),
         index = lambda wildcards : get_illumina_id(wildcards,'index')
     log:
-        'logs/guttrsnp_filter/{patientid}_{time}.log'
+        'logs/guttrsnp_filter/{samplename}.log'
     resources:
         cpus = '4',
         gpus = '0',
         walltime = '8:00:00',
         mem=lambda wildcards,input,attempt : str(32+round(1.1*((input.index.size+input.alignment.size)//1e9)))+'G'
     benchmark:
-        'benchmarks/guttrsnp_filter/{patientid}_{time}.bmk'
+        'benchmarks/guttrsnp_filter/{samplename}.bmk'
     output:
-        alleles = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.filtered'
+        alleles = 'data/auxiliary/subspecies/{samplename}.pileup.filtered'
     conda:
         '../envs/guttrsnp_filter.yaml'
     script:
@@ -102,26 +102,26 @@ rule gutTrSnp_filter:
 rule gutTrSnp_coverage:
     input:
         marker_genes_metadata = 'data/input/metadataMarkerGenesCompressed.csv',
-        alleles = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.filtered'
+        alleles = 'data/auxiliary/subspecies/{samplename}.pileup.filtered'
     log:
-        'logs/guttrsnp_coverage/{patientid}_{time}.log'
+        'logs/guttrsnp_coverage/{samplename}.log'
     resources:
         cpus = '1',
         gpus = '0',
         walltime = '8:00:00',
         mem=lambda wildcards,input,attempt : str(2+round(1.1*((input.alleles.size)//1e9)))+'G'
     benchmark:
-        'benchmarks/guttrsnp_coverage/{patientid}_{time}.bmk'
+        'benchmarks/guttrsnp_coverage/{samplename}.bmk'
     output:
-        summary = 'data/auxiliary/subspecies/{patientid}_{time}.pileup.summary'
+        summary = 'data/auxiliary/subspecies/{samplename}.pileup.summary'
     script:
         '../scripts/guttrsnp_coverage.py'
 
 rule gutTrSnp_distance:
     input:
         marker_genes_metadata = 'data/input/metadataMarkerGenesCompressed.csv',
-        pileup_source = 'data/auxiliary/subspecies/{sourceid}_{sourcetime}.pileup.filtered',
-        pileup_dest = 'data/auxiliary/subspecies/{destid}_{desttime}.pileup.filtered'
+        pileup_source = 'data/auxiliary/subspecies/{source}.pileup.filtered',
+        pileup_dest = 'data/auxiliary/subspecies/{destination}.pileup.filtered'
     params:
         VerticalCutoffAbsolute = 10,
         VerticalCutoffRelativeSource = 0.1,
@@ -132,9 +132,9 @@ rule gutTrSnp_distance:
         walltime = '1:00:00',
         mem=lambda wildcards,input,attempt : str(24+round(1.8*((input.pileup_source.size+input.pileup_dest.size)//1e9)))+'G'   
     benchmark:
-        'benchmarks/guttrsnp_distance/{sourceid}_{sourcetime}_{destid}_{desttime}.bmk' 
+        'benchmarks/guttrsnp_distance/{source}_{destination}.bmk' 
     output:
-        distance = 'data/auxiliary/subspecies/distances/{sourceid}_{sourcetime}_vs_{destid}_{desttime}.dist'
+        distance = 'data/auxiliary/subspecies/distances/{source}_vs_{destination}.dist'
     script:
         '../scripts/guttrsnp_distance.py'
         
@@ -142,8 +142,8 @@ def get_all_distances():
     ret = []
 
     for x,y in it.combinations(illumina_files,2):
-        ret.append('data/auxiliary/subspecies/distances/'+x['patientid']+'_'+str(x['time'])+'_vs_'+y['patientid']+'_'+str(y['time'])+'.dist')
-        ret.append('data/auxiliary/subspecies/distances/'+y['patientid']+'_'+str(y['time'])+'_vs_'+x['patientid']+'_'+str(x['time'])+'.dist')
+        ret.append('data/auxiliary/subspecies/distances/'+x['samplename']+'_vs_'+y['samplename']+'.dist')
+        ret.append('data/auxiliary/subspecies/distances/'+y['samplename']+'_vs_'+x['samplename']+'.dist')
 
     return ret
 
@@ -165,7 +165,7 @@ def get_all_coverages():
     ret = []
 
     for x in illumina_files:
-        ret.append('data/auxiliary/subspecies/'+x['patientid']+'_'+str(x['time'])+'.pileup.summary')
+        ret.append('data/auxiliary/subspecies/'+x['samplename']+'.pileup.summary')
 
     return ret
 

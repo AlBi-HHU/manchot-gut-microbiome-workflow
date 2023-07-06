@@ -43,3 +43,42 @@ rule bwa_index:
     shell:
         'bwa index {input}'
 
+
+rule stats:
+    input:
+        'data/auxiliary/samples/{samplename}/{readfile}.fastq'
+    output:
+        'data/auxiliary/samples/{samplename}/{readfile}.stats.csv'
+    log:
+        'logs/stats/{samplename}_{readfile}.log'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '4G',
+        walltime = '1:30:00'
+    script:
+        "../scripts/readLengths_get.py"
+
+def getAllStats(wildcards):
+    allStats = []
+    for idx, s in samples.iterrows():
+        allStats.append('data/auxiliary/samples/'+s['samplename']+ '/'+wildcards.readfile+'.stats.csv')
+    return allStats
+
+rule aggregateStats:
+    input:
+        getAllStats
+    output:
+        'data/output/'+config['project_prefix']+'_sampleStats.{readfile}.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        cpus = '1',
+        gpus = '0',
+        mem = '1G',
+        walltime = '0:30:00'
+    script:
+        "../scripts/readLengths_aggregate.py"
+

@@ -2,17 +2,17 @@ from os import walk
 
 checkpoint assemble:
 	input:
-		fastq = 'data/auxiliary/samples/{patientid}_{time}_{gvhd}/reads.fastq'
+		fastq = 'data/auxiliary/samples/{samplename}/reads.fastq'
 	output:
-		'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+		'data/auxiliary/assembly/{samplename}/flye/assembly.fasta'
 #	singularity:
 #		"docker://"+selectedWorkflow.assembler_image
 	benchmark:
-		'benchmarks/assembly/{patientid}_{time}_{gvhd}/flye/benchmark.txt'
+		'benchmarks/assembly/{samplename}/flye/benchmark.txt'
 	log:
-		'logs/assembly/{patientid}_{time}_{gvhd}/flye/log.txt'
+		'logs/assembly/{samplename}/flye/log.txt'
 	params:
-		outdir = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye'
+		outdir = 'data/auxiliary/assembly/{samplename}/flye'
 	resources:
 		#cluster execution
 		cpus = '32',
@@ -25,19 +25,19 @@ checkpoint assemble:
 '''
 rule assemble_unmapped_reads:
 	input:
-		fastq = 'data/auxiliary/samples/{patientid}_{time}_{gvhd}/reads.fastq'
+		fastq = 'data/auxiliary/samples/{samplename}/reads.fastq'
 	output:
-		'data/auxiliary/' + selectedWorkflowID + '/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+		'data/auxiliary/' + selectedWorkflowID + '/assembly/{samplename}/flye/assembly.fasta'
 		#output might not always be generated
-		#'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+		#'data/auxiliary/assembly/{samplename}/flye/assembly.fasta'
 	singularity:
 		"docker://"+selectedWorkflow.assembler_image
 	benchmark:
-		'benchmarks/assembly/{patientid}_{time}_{gvhd}/flye/benchmark.txt'
+		'benchmarks/assembly/{samplename}/flye/benchmark.txt'
 	log:
-		'logs/assembly/{patientid}_{time}_{gvhd}/flye/log.txt'
+		'logs/assembly/{samplename}/flye/log.txt'
 	params:
-		outdir = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye',
+		outdir = 'data/auxiliary/assembly/{samplename}/flye',
 		#cluster execution
 		cpus = '32',
 		gpus = '0',
@@ -58,18 +58,18 @@ def check_for_assemblies(wildcards):
 
 rule annotate:
 	input:
-		assembly = 'data/auxiliary/assembly/{patientid}_{time}_{gvhd}/flye/assembly.fasta'
+		assembly = 'data/auxiliary/assembly/{samplename}/flye/assembly.fasta'
 	output:
-		gff = report('data/output/assembly/{patientid}_{time}_{gvhd}/prokka/annotation.gff',category='Assembly',caption='../report/annotation.rst'),
-		tsv = report('data/output/assembly/{patientid}_{time}_{gvhd}/prokka/annotation.tsv',category='Assembly',caption='../report/annotation.rst')
+		gff = report('data/output/assembly/{samplename}/prokka/annotation.gff',category='Assembly',caption='../report/annotation.rst'),
+		tsv = report('data/output/assembly/{samplename}/prokka/annotation.tsv',category='Assembly',caption='../report/annotation.rst')
 #	singularity:
 #		"docker://"+selectedWorkflow.annotator_image
 	benchmark:
-		'benchmarks/assembly/{patientid}_{time}_{gvhd}/prokka/benchmark.txt'
+		'benchmarks/assembly/{samplename}/prokka/benchmark.txt'
 	log:
-		'logs/assembly/{patientid}_{time}_{gvhd}/prokka/log.txt'
+		'logs/assembly/{samplename}/prokka/log.txt'
 	params:
-		outdir = 'data/output/assembly/{patientid}_{time}_{gvhd}/prokka',
+		outdir = 'data/output/assembly/{samplename}/prokka',
 		#cluster execution
 		cpus = '4',
 		gpus = '0',
@@ -78,13 +78,13 @@ rule annotate:
 	shell:
 		'prokka --outdir {params.outdir} --force --prefix annotation --gcode {config[prokka_gcode]} --kingdom {config[prokka_kingdom]} --prefix annotation {input.assembly} 2> {log}'
 
-#Returns the corresponding short read files for a given patient and time
+#Returns the corresponding short read files for a given sample
 def getShortReads(wildcards):
 
 	fastq_files = []
 
 	#fetch entry from the sample sheet
-	ret = samples.loc[(wildcards.patientid, int(wildcards.time))]
+	ret = samples.loc[wildcards.samplename]
 	folder = ret.illuminafile
 
 	for (dirpath, dirnames, filenames) in walk(folder):
@@ -98,7 +98,7 @@ rule aggregateShortReads:
 	input:
 		getShortReads
 	output:
-		temp('data/auxiliary/assembly/{patientid}_{time}/aggregatedShortReads.fastq') #remove this later to preserve disk space
+		temp('data/auxiliary/assembly/{samplename}/aggregatedShortReads.fastq') #remove this later to preserve disk space
 	params:
 		cpus = '1',
 		gpus = '0',

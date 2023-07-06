@@ -13,12 +13,10 @@ for f in snakemake.input:
             taxonid = data[4]
             name = data[5].strip()
             fileinfo = f.split('/')
-            iddata = fileinfo[-3].rsplit('_',1)
-            patientid = iddata[0]
-            time = int(iddata[1])
-            tuples.append((patientid,time,readCount,level,name,taxonid))
+            iddata = fileinfo[-3]
+            tuples.append((iddata,readCount,level,name,taxonid))
     
-df = pd.DataFrame(tuples,columns=['patientid','time','readcount','level','taxon','taxonid'])
+df = pd.DataFrame(tuples,columns=['samplename','readcount','level','taxon','taxonid'])
 
 df.to_csv(snakemake.output[0])
 

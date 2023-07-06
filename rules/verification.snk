@@ -1,0 +1,104 @@
+rule sample_down:
+    input:
+        reads = 'data/auxiliary/samples/{samplename}/reads.fastq',
+        stream = 'data/auxiliary/mapping/{samplename}/kraken2/stream.txt', 
+        taxonomy_names = '/gpfs/project/databases/Kraken2-2022-09-28/kraken_db_plus/taxonomy/names.dmp',
+        taxonomy_nodes = '/gpfs/project/databases/Kraken2-2022-09-28/kraken_db_plus/taxonomy/nodes.dmp'
+    output:
+        reads = directory('data/auxiliary/samples/{samplename}/subsampled_{level}_reads') #make temp
+    log:
+        'logs/mapping/verification_downsampling/{samplename}_{level}.txt'
+    conda:
+        '../envs/biopanda.yaml'
+    resources:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = lambda wc,input,attempt : str(
+            round(
+                sum(1.2*x.size for x in input)/1e9
+            )+4
+
+        )+'G',
+        walltime = '48:00:00'
+    script: 
+        '../scripts/sample_for_validation.py'
+        
+rule align_verification:
+    input:
+        reads = 'data/auxiliary/samples/{samplename}/subsampled_{level}_reads',
+        database = 'data/auxiliary/databases/verification/{level}_new'
+    output:
+        flag = 'data/auxiliary/samples/{samplename}/subsampled_{level}_alignments.flag'
+    params:
+        prefix = 'tmp/{samplename}_{level}',
+        alignments = 'data/auxiliary/samples/{samplename}/subsampled_{level}_alignments'
+    conda:
+        '../envs/minimap2.yaml'
+    log:
+        'logs/mapping/verification_alignment/{samplename}_{level}.txt'
+    benchmark:
+        'benchmark/mapping/verification_alignment/{samplename}_{level}.txt'
+    resources:
+        # cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '64G',
+        walltime = '8:00:00'
+    script:
+       '../scripts/align_validation.py'
+        
+        
+rule aggregate_validation:
+    input:
+        reads = 'data/auxiliary/samples/{samplename}/subsampled_{level}_reads',
+        flag = 'data/auxiliary/samples/{samplename}/subsampled_{level}_alignments.flag'
+    output:
+        aggregation = 'data/auxiliary/samples/{samplename}/subsampled_{level}_alignments.csv'
+    params:
+        alignments = 'data/auxiliary/samples/{samplename}/subsampled_{level}_alignments'
+    conda:
+        '../envs/pysam.yaml'
+    log:
+        'logs/mapping/aggregate_verification_alignment/{samplename}_{level}.txt'
+    benchmark:
+        'benchmark/mapping/aggregate_verification_alignment/{samplename}_{level}.txt'
+    resources:
+        # cluster execution
+        cpus = '8',
+        gpus = '0',
+        mem = '8G',
+        walltime = '2:00:00'
+    script:
+       '../scripts/aggregate_validation.py'  
+       
+def get_all_validations(wildcards):
+    ret = []
+    for row in samples.itertuples():
+        if (row.samplename) in missingSamples:
+            continue
+        ret.append('data/auxiliary/samples/'+row.samplename+'/subsampled_'+wildcards.level+'_alignments.csv')
+    return ret
+        
+       
+rule combine_validations:
+    input:
+        validations = get_all_validations,
+        names = '/gpfs/project/databases/Kraken2-2022-09-28/kraken_db_plus/taxonomy/names.dmp',
+        nodes = '/gpfs/project/databases/Kraken2-2022-09-28/kraken_db_plus/taxonomy/nodes.dmp'
+    output:
+        combined = 'data/output/validation/'+config['project_prefix']+'_{level}.csv'
+    conda:
+        '../envs/biopanda.yaml'
+    benchmark:
+        'benchmark/combine_verifications_{level}.txt'
+    resources:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '2:00:00'
+    script:
+       '../scripts/combine_validations.py'   
+       
+       

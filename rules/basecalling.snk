@@ -2,16 +2,19 @@ def get_signal_file(wildcards):
     ret = signals.loc[(wildcards.signalid)]
     return ret
 
-def get_sample_file(wildcards):
-    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+def get_sample_file(wildcards): #This is only for signal files
+    ret = samples.loc[wildcards.samplename]
+    #If the sample is in fastq mode (not using a signal file) we will return an invalid file so that this path will not get evaluated by snamekae
+    if ret['mode'] == 'fastq':
+        return 'thisfiledoesnotexist'
     #If no barcode is given we can assume that all content from the signal file belongs to the given sample
-    if ret.barcode == 'None' or ret.barcode == 'none':
+    elif ret.barcode == 'None' or ret.barcode == 'none':
         return 'data/auxiliary/signals/'+ret.file+'/combined.fastq'
     else:
         return 'data/auxiliary/signals/'+ret.file+'/barcoding/'+ret.barcode+'.fastq'
 
 def get_barcode(wildcards):
-    ret = samples.loc[(wildcards.patientid,int(wildcards.time))]
+    ret = samples.loc[wildcards.samplename]
     return ret.barcode
 
 
@@ -98,11 +101,11 @@ checkpoint demultiplex: #TODO: if problems with incomplete files on cluster pers
     shell:
         "{{ {params.module_load} && {params.guppy_executable} -i {params.indir} -s {output.folder} -t {resources.cpus} --barcode_kits {params.barcodekit} --verbose_logs  ; }} 2> {log}"
 
-rule linkReads:
+rule linkReads: #For signal pathway
     input:
-        ancient(get_sample_file)
+        get_sample_file
     output:
-        'data/auxiliary/samples/{patientid}_{time}/reads.fastq'
+        temp('data/auxiliary/samples/{samplename}/reads_with_adapter.fastq')
     resources:
         cpus = '1',
         gpus = '0',
@@ -111,63 +114,44 @@ rule linkReads:
     shell:
         "ln {input} {output}"
         
-
-def get_read_folder(wildcards):
-    for row in samples.itertuples():
-        if ( row.patientid == wildcards.patientid ) and ( str(row.time) == wildcards.time ):
-            return 'data/input/reads/'+row.file +'/barcode'+str(row.barcode).zfill(2)
-    else:
-        assert(False)
+def get_read_folder_fastq_mode(wildcards):
+    return barcode_notation_mode[wildcards.samplename]
         
-#Aggregation for already basecalled files
-rule aggregate_reads:
+#Aggregation for already basecalled files (fastq mode)
+rule get_read_folder_fastq:
     input:
-         get_read_folder        
+         get_read_folder_fastq_mode
     output:
-        'data/auxiliary/samples/{patientid}_{time}/reads.fastq'
+        temp('data/auxiliary/samples/{samplename}/reads_with_adapter.fastq')
     resources:
         cpus = '1',
         gpus = '0',
         mem = '4G',
         walltime = '1:30:00'
     shell:
-        'cat {input}/*.fastq > {output}'
-
-rule stats:
+        'zcat -f {input} > {output}'
+        
+#Adapter Trimming
+rule porechop:
     input:
-        'data/auxiliary/samples/{patientid}_{time}/reads.fastq'
+        'data/auxiliary/samples/{samplename}/reads_with_adapter.fastq'
     output:
-        'data/auxiliary/samples/{patientid}_{time}/stats.csv'
+        'data/auxiliary/samples/{samplename}/reads.fastq'
+    conda:
+        '../envs/porechop.yaml'
+    benchmark:
+        'benchmarks/porechop/{samplename}.txt'
     log:
-        'logs/stats/{patientid}_{time}.unfiltered.log'
-    conda:
-        '../envs/biopanda.yaml'
+        'logs/porechop/{samplename}.txt'
     resources:
-        cpus = '1',
+        #cluster execution
+        cpus = '8',
         gpus = '0',
-        mem = '4G',
-        walltime = '1:30:00'
-    script:
-        "../scripts/readLengths_get.py"
-
-def getAllStats():
-    allStats = []
-    for idx, s in samples.iterrows():
-        allStats.append('data/auxiliary/samples/'+s['patientid'] +'_'+ str(s['time'])+ '/stats.csv')
-    return allStats
-
-rule aggregateStats:
-    input:
-        getAllStats()
-    output:
-        'data/output/sampleStats.csv'
-    conda:
-        '../envs/biopanda.yaml'
-    resources:
-        cpus = '1',
-        gpus = '0',
-        mem = '128M',
-        walltime = '0:30:00'
-    script:
-        "../scripts/readLengths_aggregate.py"
-
+        mem = lambda wc,input,attempt : str(
+            round(
+                input.size/1e9
+            )*8+8 #excessive memory consumption by porechop  see https://github.com/rrwick/Porechop/issues/77         
+                )+'G',
+        walltime = '24:00:00'        
+    shell:
+        'porechop --threads {resources.cpus} -i {input} -o {output}'
